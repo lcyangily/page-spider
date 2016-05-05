@@ -1,7 +1,7 @@
 //引入express服务器
 var spider = require('./spider.js');
-var url = 'http://www.inspirothemes.com/polo-v2/preview/index.html',
-	targetDir = 'polo-v2',
+var url = 'http://themehats.com/themes/jango/index.html',
+	targetDir = '../html-template/jango',
     override = false;
 
 /*spider.fetch(url, targetDir, override, function(){
