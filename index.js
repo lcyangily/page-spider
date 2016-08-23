@@ -1,8 +1,14 @@
 //引入express服务器
 var spider = require('./spider.js');
+<<<<<<< HEAD
 /*var url = 'http://monolit.kwst.net/index.html',
 	targetDir = '../html-css-page-template/monolit',
     override = false;*/
+=======
+var url = 'http://themehats.com/themes/jango/index.html',
+	targetDir = '../html-template/jango',
+    override = false;
+>>>>>>> origin/master
 
 /*spider.fetch(url, targetDir, override, function(){
 	console.log('fetch page end .');
