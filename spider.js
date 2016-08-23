@@ -10,6 +10,10 @@ var path = require('path');
 var url = require('url');
 var iconv = require('iconv-lite');
 
+function existsFP(path){  
+    return fs.existsSync(path);  
+}
+
 function mkdirsSync(dirpath, mode) { 
     if (!fs.existsSync(dirpath)) {
         var pathtmp;
@@ -41,7 +45,11 @@ function saveFile(urlStr, buf, targetDir, callback) {
         return;
     }
 
-    if(!mkdirsSync(pathDir)) {
+    try {
+        if(!mkdirsSync(pathDir)) {
+            return;
+        }
+    } catch (e) {
         return;
     }
 
@@ -50,7 +58,18 @@ function saveFile(urlStr, buf, targetDir, callback) {
         encoding = 'utf-8';
     }
 
-    fs.writeFile(pathUrl, buf, { encoding: encoding }, callback);
+    //下载 google css font 到本地
+    var writeBody = buf;
+    if(extName == '.html' || extName == '.htm') {
+        var reg = /href=([\'\"]{0,1})(http[s]{0,1}:\/\/fonts\.googleapis\.com\/css(.*?))\1/g;
+
+        var relPath = path.relative(pathDir, `${targetDir}\/css\/google-font.css`);
+
+        writeBody = buf.replace(reg, `href="${relPath}"`);
+    }
+    
+
+    fs.writeFile(pathUrl, writeBody, { encoding: encoding }, callback);
 }
 
 function saveFileByUrl (urlStr, targetDir, override, listObj, callback) {
@@ -59,19 +78,48 @@ function saveFileByUrl (urlStr, targetDir, override, listObj, callback) {
         nextLoad();
         return;
     }
+    //google css 特殊处理
+    var urlTmp = urlStr.split('?')[0];
+    urlTmp = urlTmp.split('#')[0];
+
+    var isGoCss = false;
     var urlObj = url.parse(urlStr);
     var pathUrl = path.join(targetDir, urlObj.path);
-    var pathDir = path.dirname(pathUrl);
     var fileName = path.basename(pathUrl);
+    if(urlTmp === 'http://fonts.googleapis.com/css') {
+        pathUrl = path.join(targetDir, 'css/google-font.css');
+        isGoCss = true;
+    }
+    //google 字体 保存路径
+    if(urlObj.hostname === 'fonts.gstatic.com') {
+        pathUrl = path.join(targetDir, `fonts/${fileName}`); //${extName}
+    }
+    var pathDir = path.dirname(pathUrl);
     var extName = path.extname(pathUrl);
+
     if(!fileName) {
         nextLoad();
         return;
     }
 
-    if(!mkdirsSync(pathDir)) {
-        nextLoad();
-        return;
+    //忽略 data: 等图片
+    if(urlStr.substr(0, 5) == 'data:') {
+        return nextLoad();
+    }
+
+    //google.com/css?a 情况先创建了 css的文件，则无法创建目录
+    /*if(extName === '') {
+        return nextLoad();
+    }*/
+
+    try {
+        if(!mkdirsSync(pathDir)) {
+            console.log("==> mkdirsSync error : " + pathDir);
+            nextLoad();
+            return;
+        }
+    } catch (e) {
+        return nextLoad();
     }
 
     if (fs.existsSync(pathUrl) && !override) {
@@ -80,37 +128,97 @@ function saveFileByUrl (urlStr, targetDir, override, listObj, callback) {
         return;
     }
 
-    console.log("-> loading : " + urlStr);
+    //urlStr = urlStr.split('?')[0];
+    //urlStr = urlStr.split('#')[0];
+
+    console.log('--> load url : ' + urlStr);
+
+    pathUrl = pathUrl.split('?')[0];
+    pathUrl = pathUrl.split('#')[0];
+
+    console.log('--> path url : ' + pathUrl);
+
     try {
+
+        //如果有跟当前文件名一样的目录，则忽略 忽略 google.com/css?a=b&c=d 情况
+        if(existsFP(pathUrl) && fs.statSync(pathUrl).isDirectory()) {
+            return nextLoad();
+        }
+
+        //google.com/css?a 情况先创建了 css的文件，则无法创建目录
+        if(path.extname(pathUrl) === '') {
+            return nextLoad();
+        }
+
         request(urlStr, {timeout : 10000}, function(e, r, body){
-            if(extName == '.css') {
-                var reg = /url\s*\(\s*([\'\"]{0,1})(.*?)\1\s*\)/g;
-                var ret;
-                var urls = [];
-                while( (ret = reg.exec(body)) != null) {
-                    //console.log(ret[2]);
-                    if(ret[2]) {
-                        urls.push(url.resolve(urlStr, ret[2]));
+            try {
+                if(extName == '.css' || isGoCss) {
+                    var reg = /url\s*\(\s*([\'\"]{0,1})(.*?)\1\s*\)/g;
+                    var ret;
+                    var urls = [];
+                    var nBody = body;
+                    while( (ret = reg.exec(nBody)) != null) {
+                        if(ret[2]) {
+                            urls.push(url.resolve(urlStr, ret[2]));
+                            console.log('===>>> css inner url : ' + url.resolve(urlStr, ret[2]));
+
+                            //将再现的 google url 替换成 本地的 url
+                            if(isGoCss) {
+                                var newUrl = '../fonts/' + path.basename(ret[2]);
+                                nBody = nBody.replace(ret[2], newUrl);
+                            }
+                        }
                     }
+                    listObj.setUrls(urls);
+
+                    setTimeout(function(){
+                        fs.writeFile(pathUrl, nBody, {encoding : 'utf-8'}, function(err){
+                            if(!err) {
+                                console.log(`.......... write file success file 【${urlStr}】`);
+                            }
+                        });
+                    }, 1000);
                 }
-                listObj.setUrls(urls);
+                return nextLoad();
+            } catch(er) {
+                console.log('------> ret exec error.');
+                return nextLoad();
             }
         })
-        .pipe(fs.createWriteStream(pathUrl))
         .on('close', function(){
             console.log("++++++++++++++++ close +++++++++++++++++");
             return nextLoad();
         })
         .on('error', function(err){
-            console.log("================ error.code : " + (err && err.code));
+            console.log("=== error.code : " + (err && err.code) + "=== error.message : " + err.message);
             return nextLoad();
-        });
+        })
+        .on('data', function(data){
+            //console.log("++++++++++++++++ data:");
+        })
+        /*.on('response', function(res){
+
+            res.on('data', function(){
+                //console.log("++++++++++++++++ res data +++++++++++++++++");
+            })
+            .on('end', function(){
+                return nextLoad();
+            });
+        })*/
+        .on('timeout', function(err){
+            console.log('=== timeout err : ' + err);
+            return nextLoad();
+        })
+        .pipe(fs.createWriteStream(pathUrl));
     } catch (e) {
+        console.log("++++++++++++++++ exception +++++++++++++++++");
+        console.log(e.message);
         console.log("++++++++++++++++ exception +++++++++++++++++");
         return nextLoad();
     }
 
     function nextLoad() {
+        console.log(' ****** download files : ' + listObj.getCurrentIndex() + '/' + listObj.getTotal() + " ******");
         if(listObj && listObj.hasNext()) {
             var urlS = listObj.getNext();
             saveFileByUrl(urlS, targetDir, override, listObj, callback);
@@ -216,15 +324,15 @@ function getPageInterval(urlStr, targetDir, override, pageListObj, allDownCallba
     var urlObj = url.parse(urlStr);
     var pathUrl = path.join(targetDir, urlObj.path);
 
-    //已存在跳过下载页面前提：不是第一个页面！
-    //至少加载一个页面后其他页面才能跳转，如果第一个页面就存在，否则可能一次都不执行
+    //å·²å­˜åœ¨è·³è¿‡ä¸‹è½½é¡µé¢å‰æï¼šä¸æ˜¯ç¬¬ä¸€ä¸ªé¡µé¢ï¼
+    //è‡³å°‘åŠ è½½ä¸€ä¸ªé¡µé¢åŽå…¶ä»–é¡µé¢æ‰èƒ½è·³è½¬ï¼Œå¦‚æžœç¬¬ä¸€ä¸ªé¡µé¢å°±å­˜åœ¨ï¼Œå¦åˆ™å¯èƒ½ä¸€æ¬¡éƒ½ä¸æ‰§è¡?
     if (fs.existsSync(pathUrl) && !override && pageListObj.getCurrentIndex() > -1) {
         console.log('=== page exists : ' + urlStr);
         return nextFunc();
     }
 
     function nextFunc(){
-        //当前页面内容获取完毕，下一个页面
+        //å½“å‰é¡µé¢å†…å®¹èŽ·å–å®Œæ¯•ï¼Œä¸‹ä¸€ä¸ªé¡µé?
         if(pageListObj.hasNext()) {
             getPageInterval(pageListObj.getNext(), targetDir, override, pageListObj, allDownCallback);
         } else {
@@ -234,7 +342,7 @@ function getPageInterval(urlStr, targetDir, override, pageListObj, allDownCallba
 
     getPage(urlStr, targetDir, override, function(body){
 
-        //解析body 获取更多页面 a
+        //è§£æžbody èŽ·å–æ›´å¤šé¡µé¢ a
         var urls = [];
         var $ = cheerio.load(body, {
             decodeEntities: false
