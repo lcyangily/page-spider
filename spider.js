@@ -324,15 +324,15 @@ function getPageInterval(urlStr, targetDir, override, pageListObj, allDownCallba
     var urlObj = url.parse(urlStr);
     var pathUrl = path.join(targetDir, urlObj.path);
 
-    //å·²å­˜åœ¨è·³è¿‡ä¸‹è½½é¡µé¢å‰æï¼šä¸æ˜¯ç¬¬ä¸€ä¸ªé¡µé¢ï¼
-    //è‡³å°‘åŠ è½½ä¸€ä¸ªé¡µé¢åŽå…¶ä»–é¡µé¢æ‰èƒ½è·³è½¬ï¼Œå¦‚æžœç¬¬ä¸€ä¸ªé¡µé¢å°±å­˜åœ¨ï¼Œå¦åˆ™å¯èƒ½ä¸€æ¬¡éƒ½ä¸æ‰§è¡?
+    //已存在跳过下载页面前提：不是第一个页面！
+    //至少加载一个页面后其他页面才能跳转，如果第一个页面就存在，否则可能一次都不执行
     if (fs.existsSync(pathUrl) && !override && pageListObj.getCurrentIndex() > -1) {
         console.log('=== page exists : ' + urlStr);
         return nextFunc();
     }
 
     function nextFunc(){
-        //å½“å‰é¡µé¢å†…å®¹èŽ·å–å®Œæ¯•ï¼Œä¸‹ä¸€ä¸ªé¡µé?
+        //当前页面内容获取完毕，下一个页面
         if(pageListObj.hasNext()) {
             getPageInterval(pageListObj.getNext(), targetDir, override, pageListObj, allDownCallback);
         } else {
@@ -342,7 +342,7 @@ function getPageInterval(urlStr, targetDir, override, pageListObj, allDownCallba
 
     getPage(urlStr, targetDir, override, function(body){
 
-        //è§£æžbody èŽ·å–æ›´å¤šé¡µé¢ a
+        //解析body 获取更多页面 a
         var urls = [];
         var $ = cheerio.load(body, {
             decodeEntities: false
@@ -408,6 +408,49 @@ exports.fetchAll = function(urlStr, targetDir, override, callback) {
     var pageListObj = new PageListClass();
 
     getPageInterval(urlStr, targetDir, override, pageListObj, callback);
+}
+
+//获取img,css,js 文件，非html文件
+exports.fetchStaticFiles = (urls, targetDir, override, callback) => {
+
+    const ListClass = function(){
+        var list = [];
+        var uniqueObj = {};
+        var index = -1;
+        this.setUrls = function(urls) {
+            urls.forEach(function(it, i) {
+                if(!uniqueObj[it]) {
+                    uniqueObj[it] = true;
+                    list.push(it);
+                }
+            });
+        }
+
+        this.getNext = function() {
+            index++;
+            if(list && list.length > index) {
+                return list[index];
+            } else {
+                return null;
+            }
+        }
+        this.hasNext = function() {
+            return list && (list.length > index + 1);
+        }
+        this.getCurrentIndex = function() {
+            return index;
+        }
+        this.getTotal = function() {
+            return list && list.length;
+        }
+    }
+
+    var listObj = new ListClass();
+    listObj.setUrls(urls);
+    
+    var startUrl = listObj.getNext();
+
+    saveFileByUrl(startUrl, targetDir, override, listObj, callback);
 }
 
 exports.test = function(urlStr, targetDir){
