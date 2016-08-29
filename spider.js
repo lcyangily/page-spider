@@ -86,7 +86,8 @@ function saveFileByUrl (urlStr, targetDir, override, listObj, callback) {
     var urlObj = url.parse(urlStr);
     var pathUrl = path.join(targetDir, urlObj.path);
     var fileName = path.basename(pathUrl);
-    if(urlTmp === 'http://fonts.googleapis.com/css') {
+    var reg = /^http[s]{0,1}:\/\/fonts\.googleapis\.com\/css(.*?)/;
+    if(reg.test(urlTmp)) {
         pathUrl = path.join(targetDir, 'css/google-font.css');
         isGoCss = true;
     }
